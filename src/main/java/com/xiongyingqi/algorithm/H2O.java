@@ -2,7 +2,6 @@ package com.xiongyingqi.algorithm;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.*;
 
 /**
@@ -39,10 +38,17 @@ import java.util.concurrent.locks.*;
 
 public class H2O {
     private int hSize = 0;
-    private final Lock hLock = new ReentrantLock();
+    private final ReadWriteLock hLock = new ReentrantReadWriteLock();
+    private final Lock hWriteLock = hLock.writeLock();
+    private final Lock hReadLock = hLock.readLock();
+    private final Condition hCondition = hWriteLock.newCondition();
 
-    private int oSize = 0;
-    private final Lock oLock = new ReentrantLock();
+//    private int oSize = 0;
+    private final ReentrantReadWriteLock oLock = new ReentrantReadWriteLock();
+    private final Lock oWriteLock = oLock.writeLock();
+//    private final Lock oReadLock = oLock.readLock();
+    private final Condition oCondition = oWriteLock.newCondition();
+
 
     public H2O() {
 
@@ -50,68 +56,87 @@ public class H2O {
 
 
     public void hydrogen(Runnable releaseHydrogen) throws InterruptedException {
+//        System.out.println("hydrogen running...");
         // 如果H个数已经达到两个
-        if (hSize >= 2) {
-            // 加锁再次检查
-            synchronized (hLock) {
-                if (hSize >= 2) {
-                    hLock.wait();
-                    System.out.println("hSize >=2 hlock notified!");
+        hReadLock.lock();
+        try {
+            if (hSize == 2) {
+                hReadLock.unlock();
+                hWriteLock.lock();
+                try {
+                    while (hSize == 2) {
+                        hCondition.await();
+                    }
+                    hReadLock.lock();
+                    releaseHydrogen.run();
+                    hSize++;
+                } finally {
+                    hWriteLock.unlock();
                 }
-                System.out.println("hSize now  <2 hlock notified!");
-                releaseHydrogen.run();
-                hSize++;
-            }
-        } else if (hSize == 1) {
-            System.out.println("hSize==2 olock notified!");
-            // 如果H个数为1，则尝试解锁O线程
-            releaseHydrogen.run();
-            synchronized (hLock) {
-                hSize++;
-                synchronized (oLock) {
-                    oLock.notify();
-                }
-            }
-        } else {
-            System.out.println("hSize now  <2 hlock notified!");
-            releaseHydrogen.run();
-            synchronized (hLock){
-                hSize++;
-                if (hSize == 2) {
-                    synchronized (oLock){
-                        oLock.notify();
+            } else {
+                while (hSize >= 2) {
+                    hReadLock.unlock();
+                    hWriteLock.lock();
+                    try {
+                        hCondition.await();
+                        hReadLock.lock();
+                    } finally {
+                        hWriteLock.unlock();
                     }
                 }
+                hReadLock.unlock();
+                hWriteLock.lock();
+                try {
+                    releaseHydrogen.run();
+                    hSize += 1;
+                    if (hSize == 2) {
+                        hWriteLock.unlock();
+                        oWriteLock.lock();
+                        try {
+                            oCondition.signal();
+                            hWriteLock.lock();
+                        } finally {
+                            oWriteLock.unlock();
+                        }
+                    }
+                    hReadLock.lock();
+                } finally {
+                    hWriteLock.unlock();
+                }
+
             }
+        } finally {
+            hReadLock.unlock();
         }
 
     }
 
     public void oxygen(Runnable releaseOxygen) throws InterruptedException {
-        if (hSize < 2) {
-            synchronized (hLock) {
-                if (hSize < 2) {
-                    synchronized (oLock) {
-                        System.out.println("hSize<2 olock Waiting...");
-                        oLock.wait();
-                        System.out.println("hSize<2 olock released!");
-                        releaseOxygen.run();
-                    }
+//        System.out.println("oxygen running...");
+        oWriteLock.lock();
+        try {
+            hReadLock.lock();
+            try {
+                while (hSize != 2) {
+                    hReadLock.unlock();
+                    oCondition.await();
+                    hReadLock.lock();
                 }
-            }
-        } else if (hSize == 2) {
-            synchronized (oLock) {
-                if (hSize == 2) {
+                hReadLock.unlock();
+                hWriteLock.lock();
+                try {
                     releaseOxygen.run();
-                    synchronized (hLock) {
-                        hLock.notify();
-                        hSize = 0;
-                    }
+                    hSize -= 2;
+                    hCondition.signalAll();
+                    hReadLock.lock();
+                } finally {
+                    hWriteLock.unlock();
                 }
+            } finally {
+                hReadLock.unlock();
             }
-        } else {
-            System.out.println("Should't be here!");
-            Thread.currentThread().interrupt();
+        } finally {
+            oWriteLock.unlock();
         }
 
     }
@@ -161,6 +186,10 @@ public class H2O {
             }
         });
         hydrogenThread.setName("hydrogenThread");
+        new Thread(hydrogenThread).start();
+        new Thread(hydrogenThread).start();
+        new Thread(hydrogenThread).start();
+
         Thread oxygenThread = new Thread(() -> {
             while (true) {
                 try {
@@ -172,6 +201,10 @@ public class H2O {
             }
         });
         oxygenThread.setName("oxygenThread");
+        new Thread(oxygenThread).start();
+        new Thread(oxygenThread).start();
+        new Thread(oxygenThread).start();
+
         oxygenThread.start();
         hydrogenThread.start();
 
