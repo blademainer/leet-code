@@ -43,10 +43,10 @@ public class H2O {
     private final Lock hReadLock = hLock.readLock();
     private final Condition hCondition = hWriteLock.newCondition();
 
-//    private int oSize = 0;
+    //    private int oSize = 0;
     private final ReentrantReadWriteLock oLock = new ReentrantReadWriteLock();
     private final Lock oWriteLock = oLock.writeLock();
-//    private final Lock oReadLock = oLock.readLock();
+    //    private final Lock oReadLock = oLock.readLock();
     private final Condition oCondition = oWriteLock.newCondition();
 
 
@@ -55,58 +55,108 @@ public class H2O {
     }
 
 
+    //    public void hydrogen(Runnable releaseHydrogen) throws InterruptedException {
+////        System.out.println("hydrogen running...");
+//        // 如果H个数已经达到两个
+//        hReadLock.lock();
+//        try {
+//            if (hSize == 2) {
+//                hReadLock.unlock();
+//                hWriteLock.lock();
+//                try {
+//                    while (hSize == 2) {
+//                        hCondition.await();
+//                    }
+//                    hReadLock.lock();
+//                    releaseHydrogen.run();
+//                    hSize++;
+//                } finally {
+//                    hWriteLock.unlock();
+//                }
+//            } else {
+////                if (hSize >= 2) {
+////                    hReadLock.unlock();
+////                    hWriteLock.lock();
+////                    try {
+////                        while (hSize >= 2) {
+////                            hCondition.await();
+////                        }
+////                        hReadLock.lock();
+////                    } finally {
+////                        hWriteLock.unlock();
+////                    }
+////
+////                }
+////                while (hSize >= 2) {
+////                    hReadLock.unlock();
+////                    hWriteLock.lock();
+////                    try {
+////                        hCondition.await();
+////                        hReadLock.lock();
+////                    } finally {
+////                        hWriteLock.unlock();
+////                    }
+////                }
+//                hReadLock.unlock();
+//                hWriteLock.lock();
+//                try {
+//                    releaseHydrogen.run();
+//                    hSize += 1;
+//                    if (hSize == 2) {
+//                        hWriteLock.unlock();
+//                        oWriteLock.lock();
+//                        try {
+//                            oCondition.signal();
+//                            hWriteLock.lock();
+//                        } finally {
+//                            oWriteLock.unlock();
+//                        }
+//                    }
+//                    hReadLock.lock();
+//                } finally {
+//                    hWriteLock.unlock();
+//                }
+//
+//            }
+//        } finally {
+//            hReadLock.unlock();
+//        }
+//
+//    }
     public void hydrogen(Runnable releaseHydrogen) throws InterruptedException {
 //        System.out.println("hydrogen running...");
         // 如果H个数已经达到两个
-        hReadLock.lock();
+        hWriteLock.lock();
         try {
-            if (hSize == 2) {
-                hReadLock.unlock();
-                hWriteLock.lock();
+            while (hSize >= 2) {
+                hWriteLock.unlock();
+                oWriteLock.lock();
                 try {
-                    while (hSize == 2) {
-                        hCondition.await();
-                    }
-                    hReadLock.lock();
-                    releaseHydrogen.run();
-                    hSize++;
+                    oCondition.signal();
+                    hWriteLock.lock();
                 } finally {
-                    hWriteLock.unlock();
+                    oWriteLock.unlock();
+                }
+                if (hSize >= 2) {
+                    hCondition.await();
+                }
+            }
+            if (hSize == 1) {
+                hSize++;
+                releaseHydrogen.run();
+                oWriteLock.lock();
+                try {
+                    oCondition.signal();
+                } finally {
+                    oWriteLock.unlock();
                 }
             } else {
-                while (hSize >= 2) {
-                    hReadLock.unlock();
-                    hWriteLock.lock();
-                    try {
-                        hCondition.await();
-                        hReadLock.lock();
-                    } finally {
-                        hWriteLock.unlock();
-                    }
-                }
-                hReadLock.unlock();
-                hWriteLock.lock();
-                try {
-                    releaseHydrogen.run();
-                    hSize += 1;
-                    if (hSize == 2) {
-                        hWriteLock.unlock();
-                        oWriteLock.lock();
-                        try {
-                            oCondition.signal();
-                            hWriteLock.lock();
-                        } finally {
-                            oWriteLock.unlock();
-                        }
-                    }
-                    hReadLock.lock();
-                } finally {
-                    hWriteLock.unlock();
-                }
-
+                hSize++;
+                releaseHydrogen.run();
             }
+
         } finally {
-            hReadLock.unlock();
+            hWriteLock.unlock();
         }
 
     }
@@ -145,6 +195,7 @@ public class H2O {
         H2O h2O = new H2O();
         final BlockingQueue queue = new ArrayBlockingQueue(1000, true);
         Thread thread = new Thread(() -> {
+            int i = 0;
             while (true) {
                 Object poll = null;
                 try {
@@ -153,7 +204,11 @@ public class H2O {
                     e.printStackTrace();
                     break;
                 }
+                System.out.println(++i);
                 System.out.println(poll);
+                if (i == 1200) {
+                    break;
+                }
             }
         });
         thread.setName("printThread");
@@ -176,7 +231,7 @@ public class H2O {
         };
 
         Thread hydrogenThread = new Thread(() -> {
-            while (true) {
+            for (int i = 0; i < 200; i++) {
                 try {
                     h2O.hydrogen(releaseHydrogen);
                 } catch (InterruptedException e) {
@@ -191,7 +246,7 @@ public class H2O {
         new Thread(hydrogenThread).start();
 
         Thread oxygenThread = new Thread(() -> {
-            while (true) {
+            for (int i = 0; i < 100; i++) {
                 try {
                     h2O.oxygen(releaseOxygen);
                 } catch (InterruptedException e) {
